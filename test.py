@@ -1,15 +1,24 @@
 import numpy as np
+import os
 
-index = np.load("e_t_index.npy", allow_pickle=True)
 
-new_index = []
 
-for l in index:
-	temp = []
-	for i in l:
-		first = i.split("_")[0]
-		if(first != "0" and first != "1"):
-			continue
-		temp.append(i)
-	new_index.append(temp)
-np.save("e_t_index.npy", new_index)
+
+if __name__ == '__main__':
+	dirlist = os.listdir("image_as_array_02_23_2021")
+	count = 0
+	count2 = 0
+	for s in dirlist:
+		s = "4_b"
+		path = "image_as_array_02_23_2021\\%s\\"%s
+		image_total = np.load(path + "predict_result_%s.npy"%s)
+		for i in image_total:
+			count += 1
+			if (i == "2"):
+				print(i)
+				count2 += 1
+
+		print("---------------------------------------------------------------------")
+		print(s + " is done")
+		print("---------------------------------------------------------------------")
+	print(str(count2) + "out of" + str(count))

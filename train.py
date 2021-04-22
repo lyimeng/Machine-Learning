@@ -1,91 +1,127 @@
-def train(info, BASE_CSV_PATH, TRAIN, TEST, MODEL_PATH, LE_PATH):
-    # import the necessary packages·
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import classification_report
-    from pyimagesearch import config
-    import numpy as np
-    import pickle
-    import os
+# import the necessary packages
+from sklearn.preprocessing import LabelEncoder
+from keras.applications import VGG16
+from keras.applications import imagenet_utils
+from keras.preprocessing.image import img_to_array
+from keras.preprocessing.image import load_img
+from imutils import paths
+import numpy as np
+import pickle
+import random
+import os
+import time
+
+start = time.time()
+ 
+# load the VGG16 network and initialize the label encoder
+print("[INFO] loading network...")
+model = VGG16(weights="imagenet", include_top=False)
+le = None
+
+# loop over the data splits
+split = "samples"
+	# grab all image paths in the current split
+print("[INFO] processing '{} split'...".format(split))
+imagePaths = list(paths.list_images(split))
+
+# randomly shuffle the image paths and then extract the class
+# labels from the file paths
+random.shuffle(imagePaths)
+
+labels = []
+labels += (["1"] * len(imagePaths))
+
+# if the label encoder is None, create it
+if le is None:
+	le = LabelEncoder()
+	le.fit(labels)
+
+# open the output CSV file for writing
+csvPath = os.path.sep.join(["profile", "{}.csv".format(split)])
 
 
-    def load_data_split(splitPath):
-        # initialize the data and labels
-        data = []
-        labels = []
-        
-        # loop over the rows in the data split file
-        for row in open(splitPath):
-            count = len(data)
-            # extract the class label and features from the row
-            row = row.strip().split(",")
-            label = row[0]
-            features = np.array(row[1:], dtype="float16")
+# imageName = []
+# with open(csvPath, "w") as csv:
+data = []
+# loop over the images in batches
+for (b, i) in enumerate(range(0, len(imagePaths), 32)):
+	# extract the batch of images and labels, then initialize the
+	# list of actual images that will be passed through the network
+	# for feature extraction
+	print("[INFO] processing batch {}/{}".format(b + 1,
+		int(np.ceil(len(imagePaths) / float(32)))))
+	batchPaths = imagePaths[i:i + 32]
+	batchLabels = le.transform(labels[i:i + 32])
+	batchImages = []
 
-            # update the data and label lists
-            data.append(features)
-            labels.append(label)
+	# loop over the images and labels in the current batch
+	for imagePath in batchPaths:
+		# load the input image using the Keras helper utility
+		# while ensuring the image is resized to 224x224 pixels
+		image = load_img(imagePath, target_size=(224, 224))
+		image = img_to_array(image)
+		# preprocess the image by (1) expanding the dimensions and
+		# (2) subtracting the mean RGB pixel intensity from the
+		# ImageNet dataset
+		image = np.expand_dims(image, axis=0)
+		image = imagenet_utils.preprocess_input(image)
 
-        # convert the data and labels to NumPy arrays
-        data = np.array(data)
-        labels = np.array(labels)
+		# add the image to the batch
+		batchImages.append(image)
 
-        # np.save("data_test.npy", data)
-        # np.save("labels_test.npy", labels)
-     
-        # return a tuple of the data and labels
-        return (data, labels)
+		# imageName.append(imagePath)
 
-
-
-    # derive the paths to the training and testing CSV files
-    trainingPath = os.path.sep.join([BASE_CSV_PATH,
-        "{}.csv".format(TRAIN)])
-    testingPath = os.path.sep.join([BASE_CSV_PATH,
-        "{}.csv".format(TEST)])
-     
-    # load the data from disk
-    print("[INFO] loading train data...")
-    (trainX, trainY) = load_data_split(trainingPath)
-    print("[INFO] loading test data...")
-    (testX, testY) = load_data_split(testingPath)
-
-    # load the label encoder from disk
-    le = pickle.loads(open(LE_PATH, "rb").read())
-
-    # train the model
-    print("[INFO] training model...")
-    model = LogisticRegression(solver="lbfgs", multi_class="auto")
+	# pass the images through the network and use the outputs as
+	# our actual features, then reshape the features into a
+	# flattened volume
+	batchImages = np.vstack(batchImages)
+	features = model.predict(batchImages, batch_size=32)
+	features = features.reshape((features.shape[0], 7 * 7 * 512))
 
 
 
-    model.fit(trainX, trainY)
+	# loop over the class labels and extracted features
+	for (label, vec) in zip(batchLabels, features):
+		# construct a row that exists of the class label and
+		# extracted features
+		# vec = ",".join([str(v) for v in vec])
+		vec = np.array(vec, dtype="float")
+		data.append(vec)
+		# csv.write("{},{}\n".format(label, vec))
+print("Done feature extraction")
+# load the label encoder from disk
+# le = pickle.loads(open(config.LE_PATH, "rb").read())
 
-    # evaluate the model
+# train the model
+print("[INFO] training model...")
+with open("profile\\model.cpickle",'rb') as fp:
+    model = pickle.load(fp)
+# evaluate the model
     print("[INFO] evaluating...")
-    preds = model.predict(testX)
+    data = np.array(data)
+    val = model.predict(data)
+    probabilities = model.predict_proba(data)
+
+# for i in range(len(val)):
+#     if (int(val[i]) == 1):
+#         val[i] = 0
+#     else:
+#         val[i] = 1
+
+# with open("wrong.csv", "w") as csv:
+#     csv.write("{},{},{},{}, {}\n".format("image path", "manual label result","model prediction","probabilities for forliage", "probabilities for gap"))
+#     for i in range(len(val)):
+#         label = imagePaths[i].split("_")[3]
+#         if (int(val[i]) != int(label)):
+#             csv.write("{},{},{},{}, {}\n".format(imagePaths[i],label,val[i], probabilities[i][0], probabilities[i][1]))
 
 
-
-    # print(classification_report(testY, preds, target_names=le.classes_))
-    result = classification_report(testY, preds, target_names=le.classes_, digits= 4)
-    text_file = open("output//result.txt", "w")
-    text_file.write(str(info) + "\n")
-    text_file.write(result)
-    text_file.close()
-    # serialize the model to disk
-    # print("[INFO] saving model...")
-
-    print(result)
-    # np.save(BASE_CSV_PATH + '\\label.npy',val)
-    # np.save(BASE_CSV_PATH+ '\\picture.npy', valX)
-    with open(MODEL_PATH, "wb") as f:
-        f.write(pickle.dumps(model))
-
-# info = "320_ 25"
-# BASE_CSV_PATH = "F:\\College\\MachineLearning\\ShortDistanceProfile\\images\\heat_map\\wl_320\\wl_320_ol_25\\output"
-# TRAIN = "training"
-# TEST = "evaluation"
-# VAL = "validation"
-# MODEL_PATH = "F:\\College\\MachineLearning\\ShortDistanceProfile\\images\\heat_map\\wl_320\\wl_320_ol_25\\output\\model.cpickle"
-# LE_PATH = "F:\\College\\MachineLearning\\ShortDistanceProfile\\images\\heat_map\\wl_320\\wl_320_ol_25\\output\\le.cpickle"
-# train(info, BASE_CSV_PATH, TRAIN, TEST, MODEL_PATH, LE_PATH)
+# with open("correct.csv", "w") as csv:
+#     csv.write("{},{},{},{}, {}\n".format("image path", "manual label result","model prediction","probabilities for forliage", "probabilities for gap"))
+#     for i in range(len(val)):
+#         label = imagePaths[i].split("_")[3]
+#         if (int(val[i]) == int(label)):
+#             csv.write("{},{},{},{}, {}\n".format(imagePaths[i],label,val[i], probabilities[i][0], probabilities[i][1]))
+# end = time.time()
+# print(end - start)
+# print(val)
